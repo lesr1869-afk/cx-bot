@@ -61,6 +61,46 @@ CREDITS_50_STARS = 399
 FREE_EFFECTS_PER_DAY = 2
 AD_EVERY_SUCCESS_COUNT = 5
 
+def _int_env(name: str, default: int) -> int:
+    raw = os.getenv(name)
+    if not raw:
+        return default
+    try:
+        v = int(raw)
+    except ValueError:
+        return default
+    return v if v > 0 else default
+
+MAX_CONCURRENT_DOWNLOADS = _int_env("MAX_CONCURRENT_DOWNLOADS", 1)
+MAX_CONCURRENT_FFMPEG_JOBS = _int_env("MAX_CONCURRENT_FFMPEG_JOBS", 1)
+CLEANUP_DOWNLOADS_MAX_AGE_HOURS = _int_env("CLEANUP_DOWNLOADS_MAX_AGE_HOURS", 72)
+
+DOWNLOAD_SEMAPHORE = asyncio.Semaphore(MAX_CONCURRENT_DOWNLOADS)
+FFMPEG_SEMAPHORE = asyncio.Semaphore(MAX_CONCURRENT_FFMPEG_JOBS)
+
+def _safe_remove(path: str | None) -> None:
+    if not isinstance(path, str) or not path:
+        return
+    try:
+        os.remove(path)
+    except OSError:
+        return
+
+def _cleanup_download_dir_if_needed() -> None:
+    if CLEANUP_DOWNLOADS_MAX_AGE_HOURS <= 0:
+        return
+    if not DOWNLOAD_DIR.exists() or not DOWNLOAD_DIR.is_dir():
+        return
+    cutoff = time.time() - (CLEANUP_DOWNLOADS_MAX_AGE_HOURS * 3600)
+    for p in DOWNLOAD_DIR.iterdir():
+        if not p.is_file():
+            continue
+        try:
+            if p.stat().st_mtime >= cutoff:
+                continue
+        except OSError:
+            continue
+        _safe_remove(str(p))
 
 def _start_healthcheck_server_if_needed() -> None:
     port_raw = os.getenv("PORT")
@@ -367,7 +407,7 @@ def get_message(key: str, lang: str) -> str:
                 "1) 🔗 Envoie un lien\n"
                 "2) 🎬 Vidéo / 🎧 Audio (ou ✨ Effets)\n"
                 "3) ⚡ Choisis la qualité (HD/SD)\n"
-                "4) � Choisis la langue audio (si dispo)\n"
+                "4) 🌍 Langue audio (si dispo)\n"
                 "5) 📩 Je t'envoie le fichier\n\n"
                 "🆕 Nouvelles fonctionnalités :\n"
                 "- 📶 Progression en direct (%, taille, vitesse, ETA)\n"
@@ -706,7 +746,14 @@ def _main_menu_keyboard(lang: str) -> InlineKeyboardMarkup:
     )
     if share_url:
         buttons.append(
-            [InlineKeyboardButton(get_message("share_button", lang), url=share_url)]
+            [
+                InlineKeyboardButton(get_message("share_button", lang), url=share_url),
+                InlineKeyboardButton(get_message("menu_button", lang), callback_data="menu_main"),
+            ]
+        )
+    else:
+        buttons.append(
+            [InlineKeyboardButton(get_message("menu_button", lang), callback_data="menu_main")]
         )
     return InlineKeyboardMarkup(buttons)
 
@@ -1060,7 +1107,8 @@ async def _download_reference_video_for_effects(
             return fname
 
     try:
-        filename = await asyncio.to_thread(_download)
+        async with DOWNLOAD_SEMAPHORE:
+            filename = await asyncio.to_thread(_download)
     except Exception:
         try:
             await progress_message.edit_text("❌ Erreur" if lang == "fr" else "❌ Error")
@@ -1082,7 +1130,8 @@ async def _download_reference_video_for_effects(
     except Exception:
         pass
 
-    stats = await asyncio.to_thread(_extract_signalstats, filename)
+    async with FFMPEG_SEMAPHORE:
+        stats = await asyncio.to_thread(_extract_signalstats, filename)
 
     try:
         await progress_message.edit_text("✅ Terminé" if lang == "fr" else "✅ Done")
@@ -1250,101 +1299,6 @@ def _extract_tiktok_direct_candidate(
     return direct_url, title, video_id
 
 
-
-def _resolve_final_url(url: str) -> str:
-    req = urllib.request.Request(
-        url,
-        headers={
-            "User-Agent": (
-                "Mozilla/5.0 (Windows NT 10.0; Win64; x64) "
-                "AppleWebKit/537.36 (KHTML, like Gecko) "
-                "Chrome/122.0 Safari/537.36"
-            ),
-            "Accept-Language": "en-US,en;q=0.9,fr;q=0.8",
-        },
-    )
-    with urllib.request.urlopen(req, timeout=20) as resp:
-        return resp.geturl()
-
-
-def _twitter_image_url_to_orig(image_url: str) -> str:
-    try:
-        parsed = urlparse(image_url)
-        if "twimg.com" not in parsed.netloc.lower():
-            return image_url
-        qs = parse_qs(parsed.query)
-        qs["name"] = ["orig"]
-        new_query = urlencode(qs, doseq=True)
-        return urlunparse(
-            (parsed.scheme, parsed.netloc, parsed.path, parsed.params, new_query, parsed.fragment)
-        )
-    except Exception:  # pylint: disable=broad-except
-        return image_url
-
-
-def _extract_twitter_photo_urls_from_syndication(tweet_url: str) -> tuple[list[str], str | None]:
-    m = re.search(r"/status/(\d+)", tweet_url)
-    if not m:
-        return [], None
-    tweet_id = m.group(1)
-    api_url = f"https://cdn.syndication.twimg.com/tweet-result?id={tweet_id}&lang=en"
-    try:
-        req = urllib.request.Request(
-            api_url,
-            headers={
-                "User-Agent": (
-                    "Mozilla/5.0 (Windows NT 10.0; Win64; x64) "
-                    "AppleWebKit/537.36 (KHTML, like Gecko) "
-                    "Chrome/122.0 Safari/537.36"
-                ),
-                "Accept-Language": "en-US,en;q=0.9,fr;q=0.8",
-            },
-        )
-        with urllib.request.urlopen(req, timeout=20) as resp:
-            data = json.loads(resp.read().decode("utf-8", errors="ignore"))
-    except Exception:  # pylint: disable=broad-except
-        logger.exception("Error fetching Twitter syndication JSON")
-        return [], None
-
-    title = data.get("text") if isinstance(data.get("text"), str) else None
-    urls: list[str] = []
-
-    entities = data.get("entities")
-    if isinstance(entities, dict):
-        media = entities.get("media")
-        if isinstance(media, list):
-            for it in media:
-                if not isinstance(it, dict):
-                    continue
-                mtype = it.get("type")
-                if mtype and mtype != "photo":
-                    continue
-                u = it.get("media_url_https") or it.get("media_url")
-                if isinstance(u, str) and u.startswith("http"):
-                    urls.append(u)
-
-    media_details = data.get("mediaDetails") or data.get("media_details")
-    if isinstance(media_details, list):
-        for it in media_details:
-            if not isinstance(it, dict):
-                continue
-            mtype = it.get("type")
-            if mtype and mtype != "photo":
-                continue
-            u = it.get("media_url_https") or it.get("media_url")
-            if isinstance(u, str) and u.startswith("http"):
-                urls.append(u)
-
-    deduped: list[str] = []
-    seen = set()
-    for u in urls:
-        u = _twitter_image_url_to_orig(u)
-        if u not in seen:
-            deduped.append(u)
-            seen.add(u)
-    return deduped, title
-
-
 async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     if not update.message:
         return
@@ -1361,10 +1315,7 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE) -> 
             context.user_data.pop("effects_entitlement_kind", None)
             old_ref = context.user_data.pop("effects_ref_file", None)
             if isinstance(old_ref, str) and os.path.exists(old_ref):
-                try:
-                    os.remove(old_ref)
-                except OSError:
-                    pass
+                _safe_remove(old_ref)
 
         ref_stats = context.user_data.get("effects_ref_stats")
         if not isinstance(ref_stats, dict):
@@ -1405,9 +1356,10 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE) -> 
         sent_ok = False
 
         try:
-            src_stats = await asyncio.to_thread(_extract_signalstats, user_path)
-            b, c, s = _compute_eq_params(src_stats, ref_stats)
-            await asyncio.to_thread(_apply_eq_filter, user_path, out_path, b, c, s)
+            async with FFMPEG_SEMAPHORE:
+                src_stats = await asyncio.to_thread(_extract_signalstats, user_path)
+                b, c, s = _compute_eq_params(src_stats, ref_stats)
+                await asyncio.to_thread(_apply_eq_filter, user_path, out_path, b, c, s)
 
             if os.path.exists(out_path):
                 file_size = os.path.getsize(out_path)
@@ -1465,10 +1417,7 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE) -> 
                     pass
             for p in (user_path, out_path):
                 if p and os.path.exists(p):
-                    try:
-                        os.remove(p)
-                    except OSError:
-                        pass
+                    _safe_remove(p)
             try:
                 await progress.edit_text("✅" if lang == "fr" else "✅")
             except Exception:
@@ -1568,9 +1517,10 @@ async def process_url(message, url: str, lang: str, quality: str, audio_lang: st
             title_direct = None
             vid_from_info = None
             try:
-                direct_url, title_direct, vid_from_info = await asyncio.to_thread(
-                    _extract_tiktok_direct_candidate, url, quality
-                )
+                async with DOWNLOAD_SEMAPHORE:
+                    direct_url, title_direct, vid_from_info = await asyncio.to_thread(
+                        _extract_tiktok_direct_candidate, url, quality
+                    )
             except DownloadError as e:
                 logger.info("TikTok direct extract failed: %s", e)
             except Exception as e:  # pylint: disable=broad-except
@@ -1664,7 +1614,8 @@ async def process_url(message, url: str, lang: str, quality: str, audio_lang: st
                 ydl.download([url])
                 return fname, has_requested_audio
 
-        filename, has_requested_audio = await asyncio.to_thread(_download)
+        async with DOWNLOAD_SEMAPHORE:
+            filename, has_requested_audio = await asyncio.to_thread(_download)
 
         if wanted_label and not has_requested_audio:
             await message.reply_text(
@@ -1695,17 +1646,22 @@ async def process_url(message, url: str, lang: str, quality: str, audio_lang: st
                     )
                 except Exception:
                     pass
-            os.remove(filename)
+            _safe_remove(filename)
             return
 
         title = os.path.basename(filename)
         sent = None
         try:
             with open(filename, "rb") as video_file:
-                sent = await message.reply_video(
-                    video=video_file,
-                    caption=title,
-                )
+                try:
+                    await message.reply_video(
+                        video=video_file,
+                        caption=title,
+                        read_timeout=600.0,
+                        write_timeout=600.0,
+                    )
+                except TypeError:
+                    await message.reply_video(video=video_file, caption=title)
         except (TimedOut, NetworkError):
             # L'envoi peut quand même réussir côté Telegram, on log juste pour debug
             logger.debug("Timed out while sending video; it may still have been delivered.")
@@ -1716,7 +1672,7 @@ async def process_url(message, url: str, lang: str, quality: str, audio_lang: st
             if file_id:
                 _cache_tiktok_file_id(tiktok_video_id, file_id)
 
-        os.remove(filename)
+        _safe_remove(filename)
         await message.reply_text(get_message("cleaned", lang))
         await _maybe_send_ad_after_success(message, lang)
         await _maybe_send_share_prompt(message, lang)
@@ -1747,13 +1703,10 @@ async def process_url(message, url: str, lang: str, quality: str, audio_lang: st
                 reply_markup=_action_keyboard(lang, "video", quality),
             )
         if filename and os.path.exists(filename):
-            try:
-                os.remove(filename)
-            except OSError:
-                pass
+            _safe_remove(filename)
 
     except Exception as e:  # pylint: disable=broad-except
-        logger.error("Error while processing URL: %s", e)
+        logger.exception("Error while processing URL: %s", e)
         if progress_message is not None:
             try:
                 await progress_message.edit_text(
@@ -1766,10 +1719,7 @@ async def process_url(message, url: str, lang: str, quality: str, audio_lang: st
             reply_markup=_action_keyboard(lang, "video", quality),
         )
         if filename and os.path.exists(filename):
-            try:
-                os.remove(filename)
-            except OSError:
-                pass
+            _safe_remove(filename)
 
 
 async def process_audio_url(message, url: str, lang: str) -> None:
@@ -1802,7 +1752,8 @@ async def process_audio_url(message, url: str, lang: str) -> None:
                 ydl.download([url])
                 return fname
 
-        filename = await asyncio.to_thread(_download)
+        async with DOWNLOAD_SEMAPHORE:
+            filename = await asyncio.to_thread(_download)
 
         try:
             await progress_message.edit_text(
@@ -1828,7 +1779,7 @@ async def process_audio_url(message, url: str, lang: str) -> None:
                     )
                 except Exception:
                     pass
-            os.remove(filename)
+            _safe_remove(filename)
             return
 
         title = os.path.basename(filename)
@@ -1843,7 +1794,7 @@ async def process_audio_url(message, url: str, lang: str) -> None:
                 "Timed out while sending audio; it may still have been delivered."
             )
 
-        os.remove(filename)
+        _safe_remove(filename)
         await message.reply_text(get_message("cleaned", lang))
         await _maybe_send_ad_after_success(message, lang)
         await _maybe_send_share_prompt(message, lang)
@@ -1875,10 +1826,7 @@ async def process_audio_url(message, url: str, lang: str) -> None:
                 reply_markup=_action_keyboard(lang, "audio", None),
             )
         if filename and os.path.exists(filename):
-            try:
-                os.remove(filename)
-            except OSError:
-                pass
+            _safe_remove(filename)
 
     except Exception as e:  # pylint: disable=broad-except
         logger.exception("Error while processing audio URL")
@@ -1894,10 +1842,7 @@ async def process_audio_url(message, url: str, lang: str) -> None:
             reply_markup=_action_keyboard(lang, "audio", None),
         )
         if filename and os.path.exists(filename):
-            try:
-                os.remove(filename)
-            except OSError:
-                pass
+            _safe_remove(filename)
 
 
 def _extract_image_info_from_html(page_url: str) -> tuple[str | None, str | None]:
@@ -2177,9 +2122,6 @@ async def process_photo_url(message, url: str, lang: str) -> None:
                     _extract_image_info_from_html, url
                 )
                 title = title or title_html
-
-            if image_url:
-                image_url = _twitter_image_url_to_orig(image_url)
 
             if not image_url:
                 photo_urls, title_syn = await asyncio.to_thread(
@@ -2675,10 +2617,7 @@ async def type_callback(
 
         old_ref = context.user_data.get("effects_ref_file")
         if isinstance(old_ref, str) and os.path.exists(old_ref):
-            try:
-                os.remove(old_ref)
-            except OSError:
-                pass
+            _safe_remove(old_ref)
 
         ref_file, ref_stats = await _download_reference_video_for_effects(query.message, ref_url, lang)
         if not ref_file or not ref_stats:
@@ -2948,6 +2887,10 @@ def main() -> None:
         )
 
     _start_healthcheck_server_if_needed()
+    try:
+        _cleanup_download_dir_if_needed()
+    except Exception:
+        logger.exception("Startup cleanup failed")
 
     async def _post_init(app: Application) -> None:
         try:
