@@ -78,6 +78,42 @@ CLEANUP_DOWNLOADS_MAX_AGE_HOURS = _int_env("CLEANUP_DOWNLOADS_MAX_AGE_HOURS", 72
 DOWNLOAD_SEMAPHORE = asyncio.Semaphore(MAX_CONCURRENT_DOWNLOADS)
 FFMPEG_SEMAPHORE = asyncio.Semaphore(MAX_CONCURRENT_FFMPEG_JOBS)
 
+_YTDLP_COOKIEFILE_READY = False
+_YTDLP_COOKIEFILE: str | None = None
+
+
+def _get_ytdlp_cookiefile() -> str | None:
+    global _YTDLP_COOKIEFILE_READY
+    global _YTDLP_COOKIEFILE
+
+    if _YTDLP_COOKIEFILE_READY:
+        return _YTDLP_COOKIEFILE
+
+    _YTDLP_COOKIEFILE_READY = True
+
+    cookie_path = os.getenv("YTDLP_COOKIES_PATH")
+    if cookie_path and os.path.exists(cookie_path):
+        _YTDLP_COOKIEFILE = cookie_path
+        return _YTDLP_COOKIEFILE
+
+    raw = os.getenv("YTDLP_COOKIES")
+    if not raw:
+        _YTDLP_COOKIEFILE = None
+        return None
+
+    if "\\n" in raw and "\n" not in raw:
+        raw = raw.replace("\\n", "\n")
+
+    out = DOWNLOAD_DIR / "ytdlp_cookies.txt"
+    try:
+        out.write_text(raw, encoding="utf-8")
+    except OSError:
+        _YTDLP_COOKIEFILE = None
+        return None
+
+    _YTDLP_COOKIEFILE = str(out)
+    return _YTDLP_COOKIEFILE
+
 def _safe_remove(path: str | None) -> None:
     if not isinstance(path, str) or not path:
         return
@@ -374,6 +410,40 @@ COMMON_YDL_OPTS = {
     "noprogress": True,
     "logger": _YtDlpLogger(),
 }
+
+_cookiefile = _get_ytdlp_cookiefile()
+if _cookiefile:
+    COMMON_YDL_OPTS["cookiefile"] = _cookiefile
+    logger.info("yt-dlp cookies: enabled")
+else:
+    logger.info("yt-dlp cookies: not configured")
+
+
+def _is_youtube_antibot_error(error_text: str) -> bool:
+    if not isinstance(error_text, str) or not error_text:
+        return False
+    s = error_text.lower()
+    return (
+        "sign in to confirm" in s
+        or "confirm you’re not a bot" in s
+        or "confirm you're not a bot" in s
+    )
+
+
+def _youtube_antibot_user_message(lang: str) -> str:
+    if lang == "fr":
+        return (
+            "⚠️ YouTube bloque ce serveur (vérification anti-bot).\n\n"
+            "✅ TikTok/Instagram/Facebook/etc. marchent souvent.\n"
+            "❌ Pour YouTube, si tu es l’admin: ajoute des cookies YouTube sur Koyeb "
+            "(variable `YTDLP_COOKIES`, format cookies.txt)."
+        )
+    return (
+        "⚠️ YouTube is blocking this server (anti-bot verification).\n\n"
+        "✅ TikTok/Instagram/Facebook/etc. often work.\n"
+        "❌ For YouTube, if you are the admin: add YouTube cookies on Koyeb "
+        "(env var `YTDLP_COOKIES`, cookies.txt format)."
+    )
 
 
 def get_user_lang(update: Update) -> str:
@@ -1109,7 +1179,21 @@ async def _download_reference_video_for_effects(
     try:
         async with DOWNLOAD_SEMAPHORE:
             filename = await asyncio.to_thread(_download)
+    except DownloadError as e:
+        error_text = str(e)
+        logger.info("Download error while fetching effects reference: %s", error_text)
+        try:
+            await progress_message.edit_text("❌ Erreur" if lang == "fr" else "❌ Error")
+        except Exception:
+            pass
+        if _is_youtube_antibot_error(error_text):
+            try:
+                await message.reply_text(_youtube_antibot_user_message(lang))
+            except Exception:
+                pass
+        return None, None
     except Exception:
+        logger.exception("Unexpected error while fetching effects reference")
         try:
             await progress_message.edit_text("❌ Erreur" if lang == "fr" else "❌ Error")
         except Exception:
@@ -1692,7 +1776,12 @@ async def process_url(message, url: str, lang: str, quality: str, audio_lang: st
                 )
             except Exception:
                 pass
-        if "No video could be found" in error_text:
+        if _is_youtube_antibot_error(error_text):
+            await message.reply_text(
+                _youtube_antibot_user_message(lang),
+                reply_markup=_action_keyboard(lang, "video", quality),
+            )
+        elif "No video could be found" in error_text:
             await message.reply_text(
                 get_message("no_video", lang),
                 reply_markup=_action_keyboard(lang, "video", quality),
@@ -1815,7 +1904,12 @@ async def process_audio_url(message, url: str, lang: str) -> None:
                 )
             except Exception:
                 pass
-        if "No video could be found" in error_text:
+        if _is_youtube_antibot_error(error_text):
+            await message.reply_text(
+                _youtube_antibot_user_message(lang),
+                reply_markup=_action_keyboard(lang, "audio", None),
+            )
+        elif "No video could be found" in error_text:
             await message.reply_text(
                 get_message("no_video", lang),
                 reply_markup=_action_keyboard(lang, "audio", None),
