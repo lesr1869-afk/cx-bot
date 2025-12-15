@@ -111,6 +111,21 @@ def _get_ytdlp_cookiefile() -> str | None:
         _YTDLP_COOKIEFILE = None
         return None
 
+    try:
+        size = out.stat().st_size
+        sample = out.read_text(encoding="utf-8", errors="ignore")[:20000]
+        lower = sample.lower()
+        has_netscape = "netscape" in lower or sample.startswith("# HTTP Cookie File")
+        has_youtube = "youtube.com" in lower
+        logger.info(
+            "yt-dlp cookies file: size=%d bytes, netscape=%s, youtube=%s",
+            int(size),
+            "yes" if has_netscape else "no",
+            "yes" if has_youtube else "no",
+        )
+    except OSError:
+        pass
+
     _YTDLP_COOKIEFILE = str(out)
     return _YTDLP_COOKIEFILE
 
