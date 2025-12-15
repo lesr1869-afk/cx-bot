@@ -5,9 +5,12 @@ import asyncio
 import json
 import time
 import subprocess
+import threading
 from pathlib import Path
 from urllib.parse import parse_qs, urlencode, urlparse, urlunparse
 import urllib.request
+
+from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 
 from telegram import InlineKeyboardButton, InlineKeyboardMarkup, InputMediaPhoto, LabeledPrice, Update
 from telegram.error import BadRequest, NetworkError, TimedOut
@@ -57,6 +60,40 @@ CREDITS_10_STARS = 99
 CREDITS_50_STARS = 399
 FREE_EFFECTS_PER_DAY = 2
 AD_EVERY_SUCCESS_COUNT = 5
+
+
+def _start_healthcheck_server_if_needed() -> None:
+    port_raw = os.getenv("PORT")
+    if not port_raw:
+        return
+    try:
+        port = int(port_raw)
+    except ValueError:
+        return
+    if port <= 0:
+        return
+
+    class _HealthHandler(BaseHTTPRequestHandler):
+        def do_GET(self) -> None:  # noqa: N802
+            if self.path in ("/", "/health", "/healthz"):
+                self.send_response(200)
+                self.send_header("Content-Type", "text/plain; charset=utf-8")
+                self.end_headers()
+                self.wfile.write(b"ok")
+                return
+            self.send_response(404)
+            self.end_headers()
+
+        def log_message(self, format: str, *args) -> None:  # noqa: A002
+            return
+
+    try:
+        server = ThreadingHTTPServer(("0.0.0.0", port), _HealthHandler)
+    except OSError:
+        return
+
+    t = threading.Thread(target=server.serve_forever, daemon=True)
+    t.start()
 
 
 def _today_key() -> str:
@@ -2910,6 +2947,8 @@ def main() -> None:
             "Please set it to your bot token from BotFather."
         )
 
+    _start_healthcheck_server_if_needed()
+
     async def _post_init(app: Application) -> None:
         try:
             me = await app.bot.get_me()
@@ -2966,3 +3005,5 @@ def main() -> None:
 
 if __name__ == "__main__":
     main()
+
+
