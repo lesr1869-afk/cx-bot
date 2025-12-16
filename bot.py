@@ -115,6 +115,82 @@ def _get_ytdlp_cookiefile() -> str | None:
         return False
 
     def _normalize_netscape_text(text: str) -> str:
+        stripped = text.lstrip()
+        json_candidate: str | None = None
+
+        if stripped.startswith("\"") or stripped.startswith("'"):
+            q = stripped[0]
+            if stripped.endswith(q) and len(stripped) >= 2:
+                json_candidate = stripped[1:-1]
+        if json_candidate is None:
+            json_candidate = stripped
+
+        data = None
+        if json_candidate.startswith("[") or json_candidate.startswith("{"):
+            try:
+                data = json.loads(json_candidate)
+            except Exception:
+                data = None
+        elif ("[" in json_candidate) or ("{" in json_candidate):
+            idxs = [i for i in (json_candidate.find("["), json_candidate.find("{")) if i >= 0]
+            start = min(idxs) if idxs else -1
+            if start >= 0:
+                try:
+                    data = json.loads(json_candidate[start:])
+                except Exception:
+                    data = None
+
+        if data is not None:
+            cookies: list[dict] = []
+            if isinstance(data, list):
+                cookies = [c for c in data if isinstance(c, dict)]
+            elif isinstance(data, dict):
+                if isinstance(data.get("cookies"), list):
+                    cookies = [c for c in data.get("cookies") if isinstance(c, dict)]
+                else:
+                    cookies = [data] if isinstance(data, dict) else []
+
+            if cookies:
+                lines: list[str] = []
+                for c in cookies:
+                    domain = c.get("domain")
+                    name = c.get("name")
+                    if not isinstance(domain, str) or not domain.strip():
+                        continue
+                    if not isinstance(name, str) or not name:
+                        continue
+                    domain = domain.strip()
+                    include_subdomains = "TRUE" if domain.startswith(".") else "FALSE"
+                    path = c.get("path")
+                    path = path if isinstance(path, str) and path else "/"
+                    secure = "TRUE" if bool(c.get("secure")) else "FALSE"
+                    expiry = c.get("expirationDate")
+                    if not isinstance(expiry, (int, float)):
+                        expiry = c.get("expires")
+                    if not isinstance(expiry, (int, float)):
+                        expiry = 0
+                    value = c.get("value")
+                    value = value if isinstance(value, str) else ""
+                    http_only = bool(c.get("httpOnly") or c.get("httponly") or c.get("http_only"))
+                    domain_field = ("#HttpOnly_" + domain) if http_only else domain
+                    lines.append(
+                        "\t".join(
+                            [
+                                domain_field,
+                                include_subdomains,
+                                path,
+                                secure,
+                                str(int(expiry)),
+                                name,
+                                value,
+                            ]
+                        )
+                    )
+                out_text = "\n".join(lines)
+                if not out_text.endswith("\n"):
+                    out_text += "\n"
+                return out_text
+
         had_trailing_nl = text.endswith("\n")
         lines: list[str] = []
         for line in text.splitlines():
@@ -178,7 +254,7 @@ def _get_ytdlp_cookiefile() -> str | None:
         size = out.stat().st_size
         sample = out.read_text(encoding="utf-8", errors="ignore")[:20000]
         lower = sample.lower()
-        has_netscape = "netscape" in lower or sample.startswith("# HTTP Cookie File")
+        has_netscape = _looks_like_netscape(sample)
         has_youtube = "youtube.com" in lower
         has_google = "google.com" in lower
 
@@ -210,6 +286,21 @@ def _get_ytdlp_cookiefile() -> str | None:
         full = out.read_text(encoding="utf-8", errors="ignore")
         if not _looks_like_netscape(full):
             logger.warning("yt-dlp cookies: invalid Netscape format; ignoring")
+            try:
+                non_comment: list[str] = []
+                for ln in full.splitlines():
+                    s = ln.strip("\r\n")
+                    if not s:
+                        continue
+                    if s.lstrip().startswith("#") and not s.startswith("#HttpOnly_"):
+                        continue
+                    non_comment.append(s[:300])
+                    if len(non_comment) >= 5:
+                        break
+                if non_comment:
+                    logger.info("yt-dlp cookies: first non-comment lines: %s", " | ".join(non_comment))
+            except Exception:
+                pass
             try:
                 out.unlink()
             except OSError:
