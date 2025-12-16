@@ -86,6 +86,35 @@ def _get_ytdlp_cookiefile() -> str | None:
     global _YTDLP_COOKIEFILE_READY
     global _YTDLP_COOKIEFILE
 
+    def _looks_like_netscape(text: str) -> bool:
+        for line in text.splitlines():
+            s = line.strip("\r\n")
+            if not s or s.lstrip().startswith("#"):
+                continue
+            if s.count("\t") >= 6:
+                return True
+        return False
+
+    def _normalize_netscape_text(text: str) -> str:
+        had_trailing_nl = text.endswith("\n")
+        lines: list[str] = []
+        for line in text.splitlines():
+            if not line or line.lstrip().startswith("#"):
+                lines.append(line)
+                continue
+            if "\t" in line:
+                lines.append(line)
+                continue
+            parts = line.split()
+            if len(parts) >= 7:
+                lines.append("\t".join(parts[:7]))
+            else:
+                lines.append(line)
+        out_text = "\n".join(lines)
+        if had_trailing_nl and not out_text.endswith("\n"):
+            out_text += "\n"
+        return out_text
+
     if _YTDLP_COOKIEFILE_READY:
         return _YTDLP_COOKIEFILE
 
@@ -93,8 +122,16 @@ def _get_ytdlp_cookiefile() -> str | None:
 
     cookie_path = os.getenv("YTDLP_COOKIES_PATH")
     if cookie_path and os.path.exists(cookie_path):
-        _YTDLP_COOKIEFILE = cookie_path
-        return _YTDLP_COOKIEFILE
+        try:
+            txt = Path(cookie_path).read_text(encoding="utf-8", errors="ignore")
+            if _looks_like_netscape(txt):
+                _YTDLP_COOKIEFILE = cookie_path
+                return _YTDLP_COOKIEFILE
+            logger.warning("yt-dlp cookies path: invalid Netscape format; ignoring")
+        except OSError:
+            pass
+        _YTDLP_COOKIEFILE = None
+        return None
 
     raw = os.getenv("YTDLP_COOKIES")
     if not raw:
@@ -103,6 +140,13 @@ def _get_ytdlp_cookiefile() -> str | None:
 
     if "\\n" in raw and "\n" not in raw:
         raw = raw.replace("\\n", "\n")
+
+    if "\\t" in raw and "\t" not in raw:
+        raw = raw.replace("\\t", "\t")
+
+    raw = _normalize_netscape_text(raw)
+    if "# netscape http cookie file" not in raw.lower():
+        raw = "# Netscape HTTP Cookie File\n" + raw
 
     out = DOWNLOAD_DIR / "ytdlp_cookies.txt"
     try:
@@ -117,14 +161,45 @@ def _get_ytdlp_cookiefile() -> str | None:
         lower = sample.lower()
         has_netscape = "netscape" in lower or sample.startswith("# HTTP Cookie File")
         has_youtube = "youtube.com" in lower
+        has_google = "google.com" in lower
+
+        needed = [
+            "sid",
+            "hsid",
+            "ssid",
+            "apisid",
+            "sapisid",
+            "__secure-1psid",
+            "__secure-3psid",
+            "visitor_info1_live",
+        ]
+        present = [k for k in needed if k in lower]
+        has_auth = bool(present)
         logger.info(
-            "yt-dlp cookies file: size=%d bytes, netscape=%s, youtube=%s",
+            "yt-dlp cookies file: size=%d bytes, netscape=%s, youtube=%s, google=%s, auth=%s, auth_keys=%s",
             int(size),
             "yes" if has_netscape else "no",
             "yes" if has_youtube else "no",
+            "yes" if has_google else "no",
+            "yes" if has_auth else "no",
+            ",".join(present) if present else "-",
         )
     except OSError:
         pass
+
+    try:
+        full = out.read_text(encoding="utf-8", errors="ignore")
+        if not _looks_like_netscape(full):
+            logger.warning("yt-dlp cookies: invalid Netscape format; ignoring")
+            try:
+                out.unlink()
+            except OSError:
+                pass
+            _YTDLP_COOKIEFILE = None
+            return None
+    except OSError:
+        _YTDLP_COOKIEFILE = None
+        return None
 
     _YTDLP_COOKIEFILE = str(out)
     return _YTDLP_COOKIEFILE
@@ -424,6 +499,13 @@ COMMON_YDL_OPTS = {
     "no_warnings": True,
     "noprogress": True,
     "logger": _YtDlpLogger(),
+    "http_headers": {
+        "User-Agent": os.getenv(
+            "YTDLP_USER_AGENT",
+            "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/122.0 Safari/537.36",
+        ),
+        "Accept-Language": os.getenv("YTDLP_ACCEPT_LANGUAGE", "en-US,en;q=0.9,fr;q=0.8"),
+    },
 }
 
 _cookiefile = _get_ytdlp_cookiefile()
