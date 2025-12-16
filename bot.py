@@ -86,16 +86,31 @@ def _get_ytdlp_cookiefile() -> str | None:
     global _YTDLP_COOKIEFILE_READY
     global _YTDLP_COOKIEFILE
 
+    def _split_netscape_fields(line: str) -> list[str] | None:
+        s = line.strip("\r\n")
+        if not s:
+            return None
+        if s.startswith("#HttpOnly_"):
+            s = s[len("#HttpOnly_") :]
+            http_only = True
+        else:
+            http_only = False
+        if s.lstrip().startswith("#"):
+            return None
+        parts = s.split("\t")
+        if len(parts) < 7:
+            parts = re.split(r"\s+", s.strip())
+        if len(parts) < 7:
+            return None
+        if len(parts) > 7:
+            parts = parts[:6] + [" ".join(parts[6:])]
+        if http_only:
+            parts[0] = "#HttpOnly_" + parts[0]
+        return parts
+
     def _looks_like_netscape(text: str) -> bool:
         for line in text.splitlines():
-            s = line.strip("\r\n")
-            if not s:
-                continue
-            if s.startswith("#HttpOnly_"):
-                pass
-            elif s.lstrip().startswith("#"):
-                continue
-            if s.count("\t") >= 6:
+            if _split_netscape_fields(line) is not None:
                 return True
         return False
 
@@ -106,19 +121,14 @@ def _get_ytdlp_cookiefile() -> str | None:
             if not line:
                 lines.append(line)
                 continue
-            if line.startswith("#HttpOnly_"):
-                pass
-            elif line.lstrip().startswith("#"):
+            if line.lstrip().startswith("#") and not line.startswith("#HttpOnly_"):
                 lines.append(line)
                 continue
-            if "\t" in line:
+            parts = _split_netscape_fields(line)
+            if parts is None:
                 lines.append(line)
                 continue
-            parts = line.split()
-            if len(parts) >= 7:
-                lines.append("\t".join(parts[:7]))
-            else:
-                lines.append(line)
+            lines.append("\t".join(parts))
         out_text = "\n".join(lines)
         if had_trailing_nl and not out_text.endswith("\n"):
             out_text += "\n"
