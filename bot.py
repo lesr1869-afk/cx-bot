@@ -89,7 +89,11 @@ def _get_ytdlp_cookiefile() -> str | None:
     def _looks_like_netscape(text: str) -> bool:
         for line in text.splitlines():
             s = line.strip("\r\n")
-            if not s or s.lstrip().startswith("#"):
+            if not s:
+                continue
+            if s.startswith("#HttpOnly_"):
+                pass
+            elif s.lstrip().startswith("#"):
                 continue
             if s.count("\t") >= 6:
                 return True
@@ -99,7 +103,12 @@ def _get_ytdlp_cookiefile() -> str | None:
         had_trailing_nl = text.endswith("\n")
         lines: list[str] = []
         for line in text.splitlines():
-            if not line or line.lstrip().startswith("#"):
+            if not line:
+                lines.append(line)
+                continue
+            if line.startswith("#HttpOnly_"):
+                pass
+            elif line.lstrip().startswith("#"):
                 lines.append(line)
                 continue
             if "\t" in line:
@@ -499,6 +508,8 @@ COMMON_YDL_OPTS = {
     "no_warnings": True,
     "noprogress": True,
     "logger": _YtDlpLogger(),
+    "ffmpeg_location": os.getenv("YTDLP_FFMPEG_LOCATION")
+    or imageio_ffmpeg.get_ffmpeg_exe(),
     "http_headers": {
         "User-Agent": os.getenv(
             "YTDLP_USER_AGENT",
