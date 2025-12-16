@@ -3,6 +3,7 @@ import os
 import re
 import asyncio
 import json
+import base64
 import time
 import subprocess
 import threading
@@ -232,6 +233,15 @@ def _get_ytdlp_cookiefile() -> str | None:
     if not raw:
         _YTDLP_COOKIEFILE = None
         return None
+
+    raw = raw.strip()
+    if raw.lower().startswith("base64:"):
+        b64 = raw.split(":", 1)[1].strip()
+        try:
+            raw = base64.b64decode(b64).decode("utf-8", errors="ignore")
+        except Exception:
+            _YTDLP_COOKIEFILE = None
+            return None
 
     if "\\n" in raw and "\n" not in raw:
         raw = raw.replace("\\n", "\n")
