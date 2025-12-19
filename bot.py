@@ -868,36 +868,44 @@ def get_message(key: str, lang: str) -> str:
             "en": "✨ Effects",
         },
         "effects_intro": {
-            "fr": (
-                "✨ Mode Effets (style/couleurs)\n\n"
-                "1) Je prends une vidéo référence\n"
-                "2) Tu m'envoies ta vidéo\n"
-                "3) Je copie le style (couleurs/contraste/saturation)\n\n"
-                "📌 Note: ce n'est pas un effet TikTok AR exact, c'est un look." 
-            ),
-            "en": (
-                "✨ Effects mode (style/colors)\n\n"
-                "1) I use a reference video\n"
-                "2) You send your video\n"
-                "3) I copy the look (colors/contrast/saturation)\n\n"
-                "📌 Note: this is not an exact TikTok AR effect, it's a look."
-            ),
+            "fr": "✨ Effets Visuels\n\nChoisis ton mode :",
+            "en": "✨ Visual Effects\n\nChoose your mode:",
         },
-        "effects_ready": {
-            "fr": "✅ Référence enregistrée. Maintenant envoie ta vidéo (fichier Telegram).",
-            "en": "✅ Reference saved. Now send your video (Telegram file).",
+        "effects_mode_preset": {
+            "fr": "🎨 Galerie d'effets",
+            "en": "🎨 Effects Gallery",
+        },
+        "effects_mode_steal": {
+            "fr": "🔥 Voler le style d'une vidéo",
+            "en": "🔥 Steal video style",
+        },
+        "effects_choose_preset": {
+            "fr": "🎨 Choisis ton effet :",
+            "en": "🎨 Choose your effect:",
+        },
+        "effects_preset_selected": {
+            "fr": "✅ Effet sélectionné : {effect_name}\n{effect_desc}\n\n📹 Envoie maintenant ta vidéo pour appliquer l'effet.",
+            "en": "✅ Effect selected: {effect_name}\n{effect_desc}\n\n📹 Now send your video to apply the effect.",
+        },
+        "effects_steal_intro": {
+            "fr": "🔥 Mode Vol de Style\n\nEnvoie le lien d'une vidéo dont tu veux copier le look (couleurs, ambiance, contraste).",
+            "en": "🔥 Style Stealing Mode\n\nSend the link of a video whose look you want to copy (colors, mood, contrast).",
         },
         "effects_need_ref": {
-            "fr": "⚠️ Envoie d'abord un lien de vidéo (référence), puis clique ✨ Effets.",
-            "en": "⚠️ First send a video link (reference), then tap ✨ Effects.",
+            "fr": "❌ Erreur : impossible de charger la vidéo de référence.",
+            "en": "❌ Error: unable to load reference video.",
+        },
+        "effects_ready": {
+            "fr": "✅ Style capturé ! Envoie maintenant ta vidéo pour appliquer l'effet.",
+            "en": "✅ Style captured! Now send your video to apply the effect.",
         },
         "effects_processing": {
-            "fr": "🎨 Application de l'effet…",
-            "en": "🎨 Applying effect…",
+            "fr": "⚙️ Application de l'effet en cours…",
+            "en": "⚙️ Applying effect…",
         },
         "effects_done": {
-            "fr": "✅ Effet appliqué.",
-            "en": "✅ Effect applied.",
+            "fr": "✨ Effet appliqué avec succès !",
+            "en": "✨ Effect applied successfully!",
         },
         "photo_disabled": {
             "fr": "🚫 Le téléchargement de photos est désactivé sur ce bot.",
@@ -1242,7 +1250,8 @@ def _clamp(val: float, lo: float, hi: float) -> float:
     return val
 
 
-def _extract_signalstats(video_path: str) -> dict[str, float]:
+def _extract_video_style(video_path: str) -> dict[str, float]:
+    """Extraction avancée du style visuel: couleurs, contraste, saturation, température, vignette."""
     exe = _ffmpeg_exe()
     vf = "select='not(mod(n,50))',signalstats,metadata=print:file=-"
     cmd = [
@@ -1275,16 +1284,29 @@ def _extract_signalstats(video_path: str) -> dict[str, float]:
     yavg = _avg("YAVG")
     ylow = _avg("YLOW")
     yhigh = _avg("YHIGH")
+    uavg = _avg("UAVG")
+    vavg = _avg("VAVG")
     ulow = _avg("ULOW")
     uhigh = _avg("UHIGH")
     vlow = _avg("VLOW")
     vhigh = _avg("VHIGH")
 
+    temp = (vavg - 128.0) / 128.0
+    tint = (uavg - 128.0) / 128.0
+
     return {
         "yavg": yavg,
         "yrange": max(1.0, yhigh - ylow),
         "crange": max(1.0, ((uhigh - ulow) + (vhigh - vlow)) / 2.0),
+        "temp": temp,
+        "tint": tint,
+        "uavg": uavg,
+        "vavg": vavg,
     }
+
+
+def _extract_signalstats(video_path: str) -> dict[str, float]:
+    return _extract_video_style(video_path)
 
 
 def _compute_eq_params(src: dict[str, float], ref: dict[str, float]) -> tuple[float, float, float]:
@@ -1298,6 +1320,200 @@ def _compute_eq_params(src: dict[str, float], ref: dict[str, float]) -> tuple[fl
     s = _clamp(s, 0.6, 1.8)
 
     return b, c, s
+
+
+PRESET_EFFECTS = {
+    "cinematic": {
+        "name_fr": "🎬 Cinématique",
+        "name_en": "🎬 Cinematic",
+        "desc_fr": "Teal & Orange, look film",
+        "desc_en": "Teal & Orange, film look",
+        "filters": [
+            "eq=contrast=1.15:saturation=0.9:brightness=-0.02",
+            "curves=preset=color_negative",
+            "colorbalance=rs=0.1:gs=-0.05:bs=-0.15:rm=0.05:bm=-0.1:rh=-0.05:gh=0.02:bh=0.08",
+            "unsharp=5:5:0.8:3:3:0.4",
+        ],
+    },
+    "vintage": {
+        "name_fr": "📼 Vintage",
+        "name_en": "📼 Vintage",
+        "desc_fr": "Rétro, grain, vignette",
+        "desc_en": "Retro, grain, vignette",
+        "filters": [
+            "eq=contrast=1.2:saturation=0.7:brightness=0.05:gamma=1.1",
+            "curves=r='0/0 0.5/0.48 1/0.95':g='0/0.05 0.5/0.5 1/0.95':b='0/0.1 0.5/0.52 1/1'",
+            "noise=alls=8:allf=t+u",
+            "vignette=angle=PI/4",
+        ],
+    },
+    "neon": {
+        "name_fr": "💎 Néon",
+        "name_en": "💎 Neon",
+        "desc_fr": "Cyberpunk, couleurs explosives",
+        "desc_en": "Cyberpunk, explosive colors",
+        "filters": [
+            "eq=contrast=1.3:saturation=1.6:brightness=-0.08",
+            "hue=s=1.4",
+            "colorbalance=rm=0.15:bm=0.2:bs=0.15",
+            "unsharp=7:7:1.2:5:5:0.0",
+        ],
+    },
+    "bw_artistic": {
+        "name_fr": "⬛ N&B Artistique",
+        "name_en": "⬛ Artistic B&W",
+        "desc_fr": "Noir & blanc contrasté",
+        "desc_en": "High contrast black & white",
+        "filters": [
+            "hue=s=0",
+            "eq=contrast=1.25:brightness=0.02:gamma=0.95",
+            "curves=preset=strong_contrast",
+            "vignette=angle=PI/3:mode=forward",
+        ],
+    },
+    "warm_sunset": {
+        "name_fr": "🌅 Coucher de soleil",
+        "name_en": "🌅 Warm Sunset",
+        "desc_fr": "Ambiance chaude dorée",
+        "desc_en": "Warm golden vibe",
+        "filters": [
+            "eq=contrast=1.1:saturation=1.2:brightness=0.03",
+            "colorbalance=rs=0.2:gs=0.05:bs=-0.15:rm=0.15:gm=0.02:bm=-0.1",
+            "curves=r='0/0 0.5/0.55 1/1':g='0/0 0.5/0.52 1/0.98':b='0/0 0.5/0.45 1/0.9'",
+        ],
+    },
+    "cool_nordic": {
+        "name_fr": "❄️ Nordique",
+        "name_en": "❄️ Nordic Cool",
+        "desc_fr": "Ambiance froide bleue",
+        "desc_en": "Cool blue mood",
+        "filters": [
+            "eq=contrast=1.15:saturation=0.85:brightness=-0.02",
+            "colorbalance=rs=-0.1:bs=0.2:rm=-0.08:bm=0.15:rh=-0.05:bh=0.1",
+            "curves=r='0/0.05 0.5/0.48 1/0.95':g='0/0.02 0.5/0.5 1/0.98':b='0/0 0.5/0.52 1/1'",
+        ],
+    },
+    "glitch": {
+        "name_fr": "⚡ Glitch",
+        "name_en": "⚡ Glitch",
+        "desc_fr": "Effet glitch distorsion",
+        "desc_en": "Glitch distortion effect",
+        "filters": [
+            "eq=contrast=1.4:saturation=1.5:brightness=0.05",
+            "rgbashift=rh=2:gh=-2:bv=2",
+            "noise=alls=15:allf=t",
+        ],
+    },
+    "film_noir": {
+        "name_fr": "🎭 Film Noir",
+        "name_en": "🎭 Film Noir",
+        "desc_fr": "Classique noir & blanc dramatique",
+        "desc_en": "Classic dramatic black & white",
+        "filters": [
+            "hue=s=0",
+            "eq=contrast=1.4:brightness=-0.05:gamma=0.85",
+            "curves=all='0/0 0.3/0.2 0.7/0.8 1/1'",
+            "vignette=angle=PI/2.5:mode=forward",
+        ],
+    },
+}
+
+
+def _apply_preset_effect(in_path: str, out_path: str, preset: str) -> None:
+    """Applique un effet prédéfini avec filtres ffmpeg avancés."""
+    exe = _ffmpeg_exe()
+    effect = PRESET_EFFECTS.get(preset)
+    if not effect:
+        raise ValueError(f"Unknown preset: {preset}")
+
+    vf = ",".join(effect["filters"])
+    cmd = [
+        exe,
+        "-hide_banner",
+        "-y",
+        "-i",
+        in_path,
+        "-map",
+        "0:v:0",
+        "-map",
+        "0:a?",
+        "-vf",
+        vf,
+        "-c:v",
+        "libx264",
+        "-preset",
+        "veryfast",
+        "-crf",
+        "23",
+        "-c:a",
+        "aac",
+        "-b:a",
+        "128k",
+        "-movflags",
+        "+faststart",
+        out_path,
+    ]
+    subprocess.run(cmd, capture_output=True, text=True, check=True)
+
+
+def _apply_stolen_style(
+    in_path: str, out_path: str, src_style: dict[str, float], ref_style: dict[str, float]
+) -> None:
+    """Applique le style 'volé' d'une vidéo de référence avec color grading avancé."""
+    exe = _ffmpeg_exe()
+
+    b = (ref_style.get("yavg", 0.0) - src_style.get("yavg", 0.0)) / 255.0
+    b = _clamp(b, -0.35, 0.35)
+
+    c = ref_style.get("yrange", 1.0) / max(1.0, src_style.get("yrange", 1.0))
+    c = _clamp(c, 0.7, 1.6)
+
+    s = ref_style.get("crange", 1.0) / max(1.0, src_style.get("crange", 1.0))
+    s = _clamp(s, 0.6, 1.8)
+
+    temp_shift = ref_style.get("temp", 0.0) - src_style.get("temp", 0.0)
+    temp_shift = _clamp(temp_shift, -0.3, 0.3)
+
+    tint_shift = ref_style.get("tint", 0.0) - src_style.get("tint", 0.0)
+    tint_shift = _clamp(tint_shift, -0.3, 0.3)
+
+    rs = temp_shift * 0.4
+    bs = -temp_shift * 0.4
+    gs = tint_shift * 0.3
+
+    filters = [
+        f"eq=brightness={b:.4f}:contrast={c:.4f}:saturation={s:.4f}",
+        f"colorbalance=rs={rs:.3f}:gs={gs:.3f}:bs={bs:.3f}",
+    ]
+
+    vf = ",".join(filters)
+    cmd = [
+        exe,
+        "-hide_banner",
+        "-y",
+        "-i",
+        in_path,
+        "-map",
+        "0:v:0",
+        "-map",
+        "0:a?",
+        "-vf",
+        vf,
+        "-c:v",
+        "libx264",
+        "-preset",
+        "veryfast",
+        "-crf",
+        "23",
+        "-c:a",
+        "aac",
+        "-b:a",
+        "128k",
+        "-movflags",
+        "+faststart",
+        out_path,
+    ]
+    subprocess.run(cmd, capture_output=True, text=True, check=True)
 
 
 def _apply_eq_filter(in_path: str, out_path: str, brightness: float, contrast: float, saturation: float) -> None:
@@ -1611,21 +1827,41 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE) -> 
     lang = get_user_lang(update)
     raw_text = (update.message.text or update.message.caption or "").strip()
 
+    if context.user_data.get("effects_waiting_ref_url"):
+        url = extract_first_url(raw_text)
+        if not url:
+            await update.message.reply_text(get_message("effects_steal_intro", lang))
+            return
+
+        context.user_data.pop("effects_waiting_ref_url", None)
+
+        old_ref = context.user_data.get("effects_ref_file")
+        if isinstance(old_ref, str) and os.path.exists(old_ref):
+            _safe_remove(old_ref)
+
+        ref_file, ref_stats = await _download_reference_video_for_effects(update.message, url, lang)
+        if not ref_file or not ref_stats:
+            context.user_data.pop("effects_entitlement_kind", None)
+            context.user_data.pop("effects_mode", None)
+            await update.message.reply_text(get_message("error_try_again", lang))
+            return
+
+        context.user_data["effects_ref_file"] = ref_file
+        context.user_data["effects_ref_stats"] = ref_stats
+        context.user_data["effects_waiting_video"] = True
+        await update.message.reply_text(get_message("effects_ready", lang))
+        return
+
     if context.user_data.get("effects_waiting_video"):
         if extract_first_url(raw_text):
             context.user_data.pop("effects_waiting_video", None)
             context.user_data.pop("effects_ref_stats", None)
+            context.user_data.pop("effects_preset_id", None)
+            context.user_data.pop("effects_mode", None)
             context.user_data.pop("effects_entitlement_kind", None)
             old_ref = context.user_data.pop("effects_ref_file", None)
             if isinstance(old_ref, str) and os.path.exists(old_ref):
                 _safe_remove(old_ref)
-
-        ref_stats = context.user_data.get("effects_ref_stats")
-        if not isinstance(ref_stats, dict):
-            context.user_data.pop("effects_waiting_video", None)
-            context.user_data.pop("effects_entitlement_kind", None)
-            await update.message.reply_text(get_message("effects_need_ref", lang))
-            return
 
         has_video = bool(update.message.video) or bool(
             update.message.document
@@ -1633,6 +1869,18 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE) -> 
             and update.message.document.mime_type.startswith("video/")
         )
         if not has_video:
+            preset_id = context.user_data.get("effects_preset_id")
+            if preset_id:
+                preset = PRESET_EFFECTS.get(preset_id)
+                if preset:
+                    effect_name = preset[f"name_{lang}"]
+                    effect_desc = preset[f"desc_{lang}"]
+                    await update.message.reply_text(
+                        get_message("effects_preset_selected", lang).format(
+                            effect_name=effect_name, effect_desc=effect_desc
+                        )
+                    )
+                    return
             await update.message.reply_text(get_message("effects_ready", lang))
             return
 
@@ -1658,11 +1906,23 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE) -> 
             entitlement_kind = None
         sent_ok = False
 
+        effects_mode = context.user_data.get("effects_mode")
+        preset_id = context.user_data.get("effects_preset_id")
+        ref_stats = context.user_data.get("effects_ref_stats")
+
         try:
-            async with FFMPEG_SEMAPHORE:
-                src_stats = await asyncio.to_thread(_extract_signalstats, user_path)
-                b, c, s = _compute_eq_params(src_stats, ref_stats)
-                await asyncio.to_thread(_apply_eq_filter, user_path, out_path, b, c, s)
+            if effects_mode == "preset" and preset_id:
+                async with FFMPEG_SEMAPHORE:
+                    await asyncio.to_thread(_apply_preset_effect, user_path, out_path, preset_id)
+            elif effects_mode == "steal" and isinstance(ref_stats, dict):
+                async with FFMPEG_SEMAPHORE:
+                    src_stats = await asyncio.to_thread(_extract_video_style, user_path)
+                    await asyncio.to_thread(_apply_stolen_style, user_path, out_path, src_stats, ref_stats)
+            else:
+                context.user_data.pop("effects_waiting_video", None)
+                context.user_data.pop("effects_entitlement_kind", None)
+                await update.message.reply_text(get_message("error_try_again", lang))
+                return
 
             if os.path.exists(out_path):
                 file_size = os.path.getsize(out_path)
@@ -1712,6 +1972,8 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE) -> 
             await update.message.reply_text(get_message("error_try_again", lang))
         finally:
             context.user_data.pop("effects_waiting_video", None)
+            context.user_data.pop("effects_mode", None)
+            context.user_data.pop("effects_preset_id", None)
             context.user_data.pop("effects_entitlement_kind", None)
             if sent_ok and update.effective_user:
                 try:
@@ -2922,28 +3184,94 @@ async def type_callback(
                 )
                 return
             context.user_data["effects_entitlement_kind"] = kind
-        await query.message.reply_text(get_message("effects_intro", lang))
-        ref_url = context.user_data.get("last_url")
-        if not isinstance(ref_url, str) or not ref_url:
-            await query.message.reply_text(get_message("effects_need_ref", lang))
-            return
-
-        old_ref = context.user_data.get("effects_ref_file")
-        if isinstance(old_ref, str) and os.path.exists(old_ref):
-            _safe_remove(old_ref)
-
-        ref_file, ref_stats = await _download_reference_video_for_effects(query.message, ref_url, lang)
-        if not ref_file or not ref_stats:
-            context.user_data.pop("effects_entitlement_kind", None)
-            await query.message.reply_text(get_message("error_try_again", lang))
-            return
-
-        context.user_data["effects_ref_file"] = ref_file
-        context.user_data["effects_ref_stats"] = ref_stats
-        context.user_data["effects_waiting_video"] = True
-        await query.message.reply_text(get_message("effects_ready", lang))
+        
+        keyboard = InlineKeyboardMarkup(
+            [
+                [
+                    InlineKeyboardButton(
+                        get_message("effects_mode_preset", lang), callback_data="effect_mode_preset"
+                    )
+                ],
+                [
+                    InlineKeyboardButton(
+                        get_message("effects_mode_steal", lang), callback_data="effect_mode_steal"
+                    )
+                ],
+            ]
+        )
+        await query.message.reply_text(get_message("effects_intro", lang), reply_markup=keyboard)
     elif data == "type_photo":
         await query.message.reply_text(get_message("photo_disabled", lang))
+
+
+async def effect_mode_callback(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    """Callback pour choix du mode effet: preset ou vol de style."""
+    query = update.callback_query
+    if not query:
+        return
+
+    _maybe_set_bot_username(getattr(context.bot, "username", None))
+
+    try:
+        await query.answer()
+    except (BadRequest, NetworkError, TimedOut):
+        pass
+
+    lang = get_user_lang(update)
+    data = query.data or ""
+
+    if data == "effect_mode_preset":
+        buttons = []
+        for preset_id, preset in PRESET_EFFECTS.items():
+            name = preset[f"name_{lang}"]
+            buttons.append(
+                [InlineKeyboardButton(name, callback_data=f"effect_preset_{preset_id}")]
+            )
+        keyboard = InlineKeyboardMarkup(buttons)
+        await query.message.reply_text(get_message("effects_choose_preset", lang), reply_markup=keyboard)
+
+    elif data == "effect_mode_steal":
+        context.user_data["effects_mode"] = "steal"
+        context.user_data["effects_waiting_ref_url"] = True
+        await query.message.reply_text(get_message("effects_steal_intro", lang))
+
+
+async def effect_preset_callback(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    """Callback pour sélection d'un effet prédéfini."""
+    query = update.callback_query
+    if not query:
+        return
+
+    _maybe_set_bot_username(getattr(context.bot, "username", None))
+
+    try:
+        await query.answer()
+    except (BadRequest, NetworkError, TimedOut):
+        pass
+
+    lang = get_user_lang(update)
+    data = query.data or ""
+
+    if not data.startswith("effect_preset_"):
+        return
+
+    preset_id = data.split("_", 2)[2]
+    preset = PRESET_EFFECTS.get(preset_id)
+    if not preset:
+        await query.message.reply_text(get_message("error_try_again", lang))
+        return
+
+    context.user_data["effects_mode"] = "preset"
+    context.user_data["effects_preset_id"] = preset_id
+    context.user_data["effects_waiting_video"] = True
+
+    effect_name = preset[f"name_{lang}"]
+    effect_desc = preset[f"desc_{lang}"]
+    await query.message.reply_text(
+        get_message("effects_preset_selected", lang).format(
+            effect_name=effect_name, effect_desc=effect_desc
+        )
+    )
 
 
 async def retry_callback(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
@@ -3235,6 +3563,8 @@ def main() -> None:
     application.add_handler(CallbackQueryHandler(retry_callback, pattern="^retry_"))
     application.add_handler(CallbackQueryHandler(audio_lang_callback, pattern="^alang_"))
     application.add_handler(CallbackQueryHandler(type_callback, pattern="^type_"))
+    application.add_handler(CallbackQueryHandler(effect_mode_callback, pattern="^effect_mode_"))
+    application.add_handler(CallbackQueryHandler(effect_preset_callback, pattern="^effect_preset_"))
     application.add_handler(CallbackQueryHandler(quality_callback, pattern="^quality_"))
     application.add_handler(CallbackQueryHandler(premium_callback, pattern="^premium_"))
     application.add_handler(PreCheckoutQueryHandler(precheckout_callback))
