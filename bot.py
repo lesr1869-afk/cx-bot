@@ -1330,7 +1330,6 @@ PRESET_EFFECTS = {
         "desc_en": "Teal & Orange, film look",
         "filters": [
             "eq=contrast=1.15:saturation=0.9:brightness=-0.02",
-            "curves=preset=color_negative",
             "colorbalance=rs=0.1:gs=-0.05:bs=-0.15:rm=0.05:bm=-0.1:rh=-0.05:gh=0.02:bh=0.08",
             "unsharp=5:5:0.8:3:3:0.4",
         ],
@@ -1338,13 +1337,11 @@ PRESET_EFFECTS = {
     "vintage": {
         "name_fr": "📼 Vintage",
         "name_en": "📼 Vintage",
-        "desc_fr": "Rétro, grain, vignette",
-        "desc_en": "Retro, grain, vignette",
+        "desc_fr": "Rétro années 70",
+        "desc_en": "Retro 70s style",
         "filters": [
             "eq=contrast=1.2:saturation=0.7:brightness=0.05:gamma=1.1",
-            "curves=r='0/0 0.5/0.48 1/0.95':g='0/0.05 0.5/0.5 1/0.95':b='0/0.1 0.5/0.52 1/1'",
-            "noise=alls=8:allf=t+u",
-            "vignette=angle=PI/4",
+            "colorbalance=rs=0.15:gs=0.05:bs=-0.1:rm=0.1:bm=-0.05",
         ],
     },
     "neon": {
@@ -1353,22 +1350,19 @@ PRESET_EFFECTS = {
         "desc_fr": "Cyberpunk, couleurs explosives",
         "desc_en": "Cyberpunk, explosive colors",
         "filters": [
-            "eq=contrast=1.3:saturation=1.6:brightness=-0.08",
-            "hue=s=1.4",
+            "eq=contrast=1.3:saturation=1.8:brightness=-0.08",
             "colorbalance=rm=0.15:bm=0.2:bs=0.15",
             "unsharp=7:7:1.2:5:5:0.0",
         ],
     },
-    "bw_artistic": {
-        "name_fr": "⬛ N&B Artistique",
-        "name_en": "⬛ Artistic B&W",
-        "desc_fr": "Noir & blanc contrasté",
-        "desc_en": "High contrast black & white",
+    "bw_contrast": {
+        "name_fr": "⬛ N&B Contrasté",
+        "name_en": "⬛ High Contrast B&W",
+        "desc_fr": "Noir & blanc dramatique",
+        "desc_en": "Dramatic black & white",
         "filters": [
             "hue=s=0",
-            "eq=contrast=1.25:brightness=0.02:gamma=0.95",
-            "curves=preset=strong_contrast",
-            "vignette=angle=PI/3:mode=forward",
+            "eq=contrast=1.4:brightness=-0.03:gamma=0.9",
         ],
     },
     "warm_sunset": {
@@ -1377,43 +1371,38 @@ PRESET_EFFECTS = {
         "desc_fr": "Ambiance chaude dorée",
         "desc_en": "Warm golden vibe",
         "filters": [
-            "eq=contrast=1.1:saturation=1.2:brightness=0.03",
+            "eq=contrast=1.1:saturation=1.25:brightness=0.03",
             "colorbalance=rs=0.2:gs=0.05:bs=-0.15:rm=0.15:gm=0.02:bm=-0.1",
-            "curves=r='0/0 0.5/0.55 1/1':g='0/0 0.5/0.52 1/0.98':b='0/0 0.5/0.45 1/0.9'",
         ],
     },
-    "cool_nordic": {
-        "name_fr": "❄️ Nordique",
-        "name_en": "❄️ Nordic Cool",
+    "cool_blue": {
+        "name_fr": "❄️ Bleu Glacé",
+        "name_en": "❄️ Icy Blue",
         "desc_fr": "Ambiance froide bleue",
         "desc_en": "Cool blue mood",
         "filters": [
             "eq=contrast=1.15:saturation=0.85:brightness=-0.02",
-            "colorbalance=rs=-0.1:bs=0.2:rm=-0.08:bm=0.15:rh=-0.05:bh=0.1",
-            "curves=r='0/0.05 0.5/0.48 1/0.95':g='0/0.02 0.5/0.5 1/0.98':b='0/0 0.5/0.52 1/1'",
+            "colorbalance=rs=-0.15:bs=0.2:rm=-0.1:bm=0.15:rh=-0.05:bh=0.1",
         ],
     },
-    "glitch": {
-        "name_fr": "⚡ Glitch",
-        "name_en": "⚡ Glitch",
-        "desc_fr": "Effet glitch distorsion",
-        "desc_en": "Glitch distortion effect",
+    "vibrant": {
+        "name_fr": "🌈 Vibrant",
+        "name_en": "🌈 Vibrant",
+        "desc_fr": "Couleurs éclatantes",
+        "desc_en": "Vivid colors boost",
         "filters": [
-            "eq=contrast=1.4:saturation=1.5:brightness=0.05",
-            "rgbashift=rh=2:gh=-2:bv=2",
-            "noise=alls=15:allf=t",
+            "eq=contrast=1.2:saturation=1.5:brightness=0.02",
+            "unsharp=5:5:1.0:3:3:0.0",
         ],
     },
-    "film_noir": {
-        "name_fr": "🎭 Film Noir",
-        "name_en": "🎭 Film Noir",
-        "desc_fr": "Classique noir & blanc dramatique",
-        "desc_en": "Classic dramatic black & white",
+    "soft_dream": {
+        "name_fr": "☁️ Doux Rêveur",
+        "name_en": "☁️ Soft Dream",
+        "desc_fr": "Look doux et aérien",
+        "desc_en": "Soft and dreamy look",
         "filters": [
-            "hue=s=0",
-            "eq=contrast=1.4:brightness=-0.05:gamma=0.85",
-            "curves=all='0/0 0.3/0.2 0.7/0.8 1/1'",
-            "vignette=angle=PI/2.5:mode=forward",
+            "eq=contrast=0.9:saturation=0.8:brightness=0.05:gamma=1.15",
+            "colorbalance=rs=0.05:gs=0.03:rm=0.03",
         ],
     },
 }
